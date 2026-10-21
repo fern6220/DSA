@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Python-Based Garden Simulator</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<style>
+  body{background:#07160e;color:#d9f2e0;font-family:Georgia,'Times New Roman',serif}
+  .panel{position:relative;background:#0d2617;border:1px solid #1f5c38;border-radius:12px;padding:14px}
+  .panel.locked .body{filter:blur(2px);opacity:.3;pointer-events:none}
+  .panel.locked::after{content:attr(data-lock);position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:16px;font-size:.85rem;color:#86efac}
+  .tile{aspect-ratio:1;border-radius:8px;border:1px solid #1f5c38;background:#0a1f13;font-size:1.6rem;transition:transform .12s;position:relative}
+  .tile:hover{transform:scale(1.06);border-color:#4ade80}
+  .tile.planted{background:#14532d}
+  .tile.watered{background:#14532d;box-shadow:inset 0 -3px 0 rgba(56,189,248,.55)}
+  .tile.watered::after{content:'💧';position:absolute;right:3px;bottom:2px;font-size:.55rem}
+  .tile.ready{background:#854d0e}
+  .btn{background:#166534;padding:6px 12px;border-radius:8px;font-size:.85rem}.btn:hover{background:#15803d}
+  .btn.alt{background:#1e293b}.btn.alt:hover{background:#334155}
+  select,textarea{background:#06120b;border:1px solid #1f5c38;border-radius:8px;color:#d9f2e0}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+</style>
+</head>
+<body class="min-h-screen p-4 md:p-6">
+<header class="max-w-6xl mx-auto mb-4">
+  <h1 class="text-2xl md:text-3xl font-bold text-green-300">🌱 Python-Based Garden Simulator</h1>
+  <p class="text-sm text-green-200/70">Run Python data structures in your browser to unlock a living sanctuary. Supports SDG 2 (Zero Hunger), SDG 13 (Climate Action), SDG 15 (Life on Land).</p>
+  <p id="status" class="text-xs mt-1 text-amber-300">Loading Python engine (Pyodide)…</p>
+</header>
+
+<main class="max-w-6xl mx-auto">
+  <div class="flex gap-2 mb-4">
+    <button id="tab-garden" class="btn" onclick="showTab('garden')">🌿 Interactive Sanctuary</button>
+    <button id="tab-editor" class="btn alt" onclick="showTab('editor')">💻 Student Code Editor</button>
+  </div>
+
+  <!-- SANCTUARY TAB -->
+  <section id="view-garden" class="grid md:grid-cols-3 gap-4">
+    <!-- LEFT COLUMN: Resources, Queue & Repositioned Console -->
+    <div class="space-y-4">
+      <div id="panel-resources" class="panel locked" data-lock="🔒 Run Topic 1 (Resource Storage, Seed Bag & Market)">
+        <div class="body">
+          <h2 class="font-bold text-green-300 mb-2">Resource Storage & Market</h2>
+          <div class="grid grid-cols-2 gap-2 text-sm">
+            <div>💧 Water: <b id="r-water">∞</b></div><div>🌰 Seeds: <b id="r-seeds">0</b></div>
+            <div>⚡ Energy: <b id="r-energy">0</b></div><div>✨ Hope: <b id="r-hope">0</b></div>
+            <div>🪙 Coins: <b id="r-coins">0</b></div>
+          </div>
+          <p class="text-sm mt-2">🧺 Produce: <b id="r-produce">none</b></p>
+          <div class="flex flex-wrap gap-2 mt-3">
+            <button class="btn" onclick="buySeeds(1)">Buy 1 seed (3 🪙)</button>
+            <button class="btn alt" onclick="buySeeds(5)">Buy 5 (15 🪙)</button>
+            <button class="btn" onclick="sellProduce()">Sell produce (2× value)</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="panel-queue" class="panel locked" data-lock="🔒 Run Topic 3 (ClimateQueue FIFO)">
+        <div class="body">
+          <h2 class="font-bold text-green-300 mb-2">Climate Queue (FIFO)</h2>
+          <ol id="queue-list" class="text-sm list-decimal pl-5 min-h-[3rem] mb-2"></ol>
+          <div class="flex gap-2">
+            <button class="btn" onclick="processEvent()">Dequeue next</button>
+            <button class="btn alt" onclick="addEvent()">Enqueue random</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- REPOSITIONED CONSOLE PANEL DIRECTLY BELOW CLIMATE QUEUE -->
+      <div class="panel">
+        <div class="flex justify-between mb-1">
+          <h2 class="font-bold text-green-300 text-sm">Console Log</h2>
+          <button class="text-xs text-green-200/60 hover:text-green-200" onclick="consoleEl.innerHTML=''">clear</button>
+        </div>
+        <div id="console" class="mono text-xs h-48 overflow-y-auto whitespace-pre-wrap border border-green-900/50 p-2 rounded bg-black/30"></div>
+      </div>
+    </div>
+
+    <!-- MIDDLE COLUMN: Plot Grid -->
+    <div id="panel-grid" class="panel locked" data-lock="🔒 Run Topic 4 (GardenGrid & Manager)">
+      <div class="body">
+        <h2 class="font-bold text-green-300 mb-2">Sanctuary Plot (5×5)</h2>
+        <div class="flex flex-wrap gap-2 mb-3 text-sm">
+          <select id="action-select" class="p-1">
+            <option value="plant">Plant</option>
+            <option value="water">Water (advance stage)</option>
+            <option value="harvest">Harvest</option>
+          </select>
+          <select id="plant-select" class="p-1"><option>— run Topic 1 —</option></select>
+        </div>
+        <div id="grid" class="grid grid-cols-5 gap-1.5"></div>
+        <p class="text-xs mt-2 text-green-200/60">Lifecycle: 🌱 Seed → 🌿 Sprout → 🌸 Flower → 🍎 Mature → Harvest (clears plot).</p>
+      </div>
+    </div>
+
+    <!-- RIGHT COLUMN: History & Growth Tree -->
+    <div class="space-y-4">
+      <div id="panel-history" class="panel locked" data-lock="🔒 Run Topic 2 (ActionHistoryStack)">
+        <div class="body">
+          <h2 class="font-bold text-green-300 mb-2">Activity Ledger (LIFO audit log)</h2>
+          <ul id="history-list" class="text-sm mono min-h-[4rem] max-h-48 overflow-y-auto mb-2"></ul>
+          <p class="text-xs text-green-200/60">Newest entry first. Permanent audit log entries.</p>
+        </div>
+      </div>
+      <div id="panel-taxonomy" class="panel locked" data-lock="🔒 Run Topic 5 (GrowthTree lifecycle)">
+        <div class="body">
+          <h2 class="font-bold text-green-300 mb-2">Plant Growth Stage Tree</h2>
+          <pre id="taxonomy-out" class="text-xs mono min-h-[4rem] overflow-x-auto mb-2"></pre>
+          <button class="btn" onclick="runDFS()">Trace lifecycle (Pre-Order DFS)</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- EDITOR TAB -->
+  <section id="view-editor" class="hidden">
+    <div class="panel">
+      <div class="flex flex-wrap gap-2 mb-2 text-sm">
+        <span class="self-center text-green-200/70">Load starter code:</span>
+        <button class="btn alt" onclick="loadTopic(1)">1 · Storage & Market</button>
+        <button class="btn alt" onclick="loadTopic(2)">2 · Ledger (Stack)</button>
+        <button class="btn alt" onclick="loadTopic(3)">3 · Queue</button>
+        <button class="btn alt" onclick="loadTopic(4)">4 · Grid</button>
+        <button class="btn alt" onclick="loadTopic(5)">5 · Growth Tree</button>
+      </div>
+      <textarea id="editor" spellcheck="false" class="mono w-full h-80 p-3 text-sm"></textarea>
+      <div class="flex gap-2 mt-2">
+        <button id="run-btn" class="btn" onclick="runPythonCode()" disabled>▶ Run Python</button>
+        <button id="run-all" class="btn alt" onclick="runAllTopics()" disabled>Run all 5 topics</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+/* ---------- Python starter code for each DSA topic ---------- */
+const TOPICS = {
+1: String.raw`import js
+from pyodide.ffi import to_js
+
+SEED_PRICE = 3                       # coins per seed
+
+def ledger(kind, detail):            # writes to the audit log once Topic 2 has run
+    if "history_stack" in globals():
+        history_stack.push(kind + ": " + detail)
+
+class Resource:
+    def __init__(self, name, amount):
+        self.name, self.amount = name, amount
+
+class Crop:
+    def __init__(self, name, emoji, days, value):
+        self.name, self.emoji, self.days, self.value = name, emoji, days, value
+    def label(self):
+        return self.emoji + " " + self.name
+
+class ResourceStorage:
+    def __init__(self):
+        start = [("seeds", 10), ("energy", 20), ("hope", 5), ("coins", 15)]
+        self.items = {n: Resource(n, a) for n, a in start}
+        self.produce = {}            # harvested crops waiting to be sold
+    def get(self, n):
+        return self.items[n].amount if n in self.items else 0
+    def add(self, n, delta):
+        if n in self.items:
+            self.items[n].amount = max(0, self.items[n].amount + delta)
+    def add_produce(self, crop):
+        self.produce[crop.name] = self.produce.get(crop.name, 0) + 1
+    def buy_seeds(self, n=1):
+        cost = n * SEED_PRICE
+        if self.get("coins") < cost:
+            return "⚠ Need " + str(cost) + " coins to buy " + str(n) + " seed(s)."
+        self.add("coins", -cost)
+        self.add("seeds", n)
+        ledger("Bought Seeds", str(n) + " for " + str(cost) + " coins")
+        self.sync()
+        return "Bought " + str(n) + " seed(s) for " + str(cost) + " coins"
+    def sell_produce(self):
+        if not self.produce:
+            return "⚠ No harvested produce to sell."
+        total, count = 0, 0
+        for name, qty in self.produce.items():
+            crop = next(c for c in seed_bag if c.name == name)
+            total += qty * crop.value * 2          # market pays 2x value
+            count += qty
+        self.produce = {}
+        self.add("coins", total)
+        ledger("Sold Produce", str(count) + " item(s) for " + str(total) + " coins")
+        self.sync()
+        return "Sold " + str(count) + " item(s) for " + str(total) + " coins (2x value)"
+    def sync(self):
+        summary = ", ".join(n + "×" + str(q) for n, q in self.produce.items()) or "none"
+        js.updateResources("∞", *[self.get(n) for n in ("seeds", "energy", "hope", "coins")], summary)
+
+storage = ResourceStorage()
+
+# EXPANDED SEED BAG CATALOG
+seed_bag = [
+    Crop("Tomato", "🍅", 3, 4),
+    Crop("Maize", "🌽", 4, 5),
+    Crop("Bean", "🫘", 2, 3),
+    Crop("Mango sapling", "🥭", 6, 8),
+    Crop("Carrot", "🥕", 2, 3),
+    Crop("Strawberry", "🍓", 3, 6),
+    Crop("Sunflower", "🌻", 4, 7),
+    Crop("Watermelon", "🍉", 5, 10),
+    Crop("Broccoli", "🥦", 3, 5)
+]
+
+js.gardenPlants = to_js([c.label() for c in seed_bag])
+js.addPlantsToDropdown()
+storage.sync()
+print("Seed bag loaded with", len(seed_bag), "crop options. Seeds cost", SEED_PRICE, "coins each.")`,
+
+2: String.raw`import js
+from pyodide.ffi import to_js
+
+class Node:
+    def __init__(self, data, nxt=None):
+        self.data, self.next = data, nxt
+
+class ActionHistoryStack:            # LIFO audit log on a singly linked list
+    def __init__(self):
+        self.top, self.size = None, 0
+    def push(self, entry):
+        self.top = Node(entry, self.top)
+        self.size += 1
+        self.sync()
+    def peek(self):
+        return self.top.data if self.top else None
+    def to_list(self):
+        out, cur = [], self.top
+        while cur:
+            out.append(cur.data)
+            cur = cur.next
+        return out
+    def sync(self):
+        js.updateHistory(to_js(self.to_list()))
+
+history_stack = ActionHistoryStack()
+history_stack.push("Ledger opened")
+print("Latest ledger entry:", history_stack.peek())`,
+
+3: String.raw`import js
+from pyodide.ffi import to_js
+
+class QueueNode:
+    def __init__(self, data):
+        self.data, self.next = data, None
+
+EFFECTS = {"Rain": ("hope", 2), "Drought": ("energy", -5), "Heatwave": ("energy", -5),
+           "Pollinators": ("hope", 3), "Frost": ("hope", -2)}
+
+class ClimateQueue:                  # FIFO queue on a singly linked list
+    def __init__(self):
+        self.front = self.rear = None
+        self.size = 0
+    def enqueue(self, event):
+        node = QueueNode(event)
+        if self.rear is None:
+            self.front = self.rear = node
+        else:
+            self.rear.next = node
+            self.rear = node
+        self.size += 1
+        self.sync()
+    def dequeue(self):
+        if self.front is None:
+            return None
+        node = self.front
+        self.front = node.next
+        if self.front is None:
+            self.rear = None
+        self.size -= 1
+        self.sync()
+        return node.data
+    def to_list(self):
+        out, cur = [], self.front
+        while cur:
+            out.append(cur.data)
+            cur = cur.next
+        return out
+    def process_next(self):
+        event = self.dequeue()
+        if event is None:
+            return "No climate events waiting."
+        res, delta = EFFECTS[event]
+        if "storage" in globals():
+            storage.add(res, delta)
+            storage.sync()
+        if "history_stack" in globals():
+            history_stack.push("Climate event: " + event)
+        return event + " hit the garden (" + res + " " + str(delta) + ")"
+    def sync(self):
+        js.updateQueue(to_js(self.to_list()))
+
+climate_queue = ClimateQueue()
+for e in ["Rain", "Drought", "Pollinators"]:
+    climate_queue.enqueue(e)
+print("Queued events:", climate_queue.to_list())`,
+
+4: String.raw`import js
+from pyodide.ffi import to_js
+
+if "storage" not in globals() or "history_stack" not in globals():
+    raise RuntimeError("Run Topic 1 (storage) and Topic 2 (history_stack) first.")
+
+SIZE = 5
+STAGE_EMOJIS = ["🌱", "🌿", "🌸"]
+
+class GardenGrid:                    # 5x5 2D list
+    def __init__(self):
+        self.cells = [[{"state": "empty", "crop": None, "stage_idx": 0} for _ in range(SIZE)] for _ in range(SIZE)]
+    def locate(self, pos):
+        if isinstance(pos, (tuple, list)):
+            pos = pos[0] * SIZE + pos[1]
+        return divmod(int(pos), SIZE)
+    def cell(self, pos):
+        r, c = self.locate(pos)
+        return self.cells[r][c]
+    def snapshot(self):
+        out = []
+        for row in self.cells:
+            for cell in row:
+                if cell["state"] == "empty":
+                    out.append("empty|")
+                elif cell["state"] == "ready":
+                    out.append("ready|" + cell["crop"].emoji)
+                else:
+                    emoji = STAGE_EMOJIS[min(cell["stage_idx"], len(STAGE_EMOJIS) - 1)]
+                    out.append(cell["state"] + "|" + emoji)
+        return out
+
+class GardenManager:
+    def __init__(self, grid, storage, history, bag):
+        self.grid, self.storage, self.history, self.bag = grid, storage, history, bag
+    def handle_action(self, pos, action, crop):
+        r, c = self.grid.locate(pos)
+        cell, where = self.grid.cell(pos), "(" + str(r) + "," + str(c) + ")"
+        s, msg = self.storage, None
+        
+        if action == "plant":
+            chosen = next((x for x in self.bag if x.label() == crop), None)
+            if cell["state"] != "empty":
+                msg = "⚠ " + where + " is already in use."
+            elif chosen is None:
+                msg = "⚠ Pick a crop first."
+            elif s.get("seeds") < 1:
+                msg = "⚠ No seeds left. Buy more at the market."
+            else:
+                s.add("seeds", -1)
+                cell["state"] = "planted"
+                cell["crop"] = chosen
+                cell["stage_idx"] = 0
+                msg = "Planted " + chosen.name + " seed at " + where
+                
+        elif action == "water":
+            # UNLIMITED WATER MECHANIC: Water is free and infinite
+            if cell["state"] == "empty":
+                msg = "⚠ " + where + " is empty. Plant a seed first."
+            elif cell["state"] == "ready":
+                msg = "⚠ " + cell["crop"].name + " at " + where + " is fully grown and ready to harvest!"
+            else:
+                cell["stage_idx"] += 1
+                if cell["stage_idx"] >= 3:
+                    cell["state"] = "ready"
+                    msg = "Watered " + cell["crop"].name + " at " + where + " → Fully Grown! (Ready to harvest)"
+                else:
+                    cell["state"] = "watered"
+                    stage_name = ["Sprout", "Flower"][cell["stage_idx"] - 1]
+                    msg = "Watered " + cell["crop"].name + " at " + where + " → Advanced to " + stage_name + " stage"
+                    
+        elif action == "harvest":
+            if cell["state"] != "ready":
+                msg = "⚠ Nothing ready to harvest at " + where + " (needs to reach Fully Grown stage)."
+            else:
+                crop_obj = cell["crop"]
+                s.add_produce(crop_obj)
+                s.add("coins", crop_obj.value)
+                s.add("hope", 2)
+                cell["state"], cell["crop"], cell["stage_idx"] = "empty", None, 0
+                msg = "Harvested " + crop_obj.name + " at " + where + " (+" + str(crop_obj.value) + " coins, +1 produce, +2 hope). Plot cleared!"
+        else:
+            msg = "⚠ Unknown action: " + str(action)
+            
+        if not msg.startswith("⚠"):
+            self.history.push(msg)
+        s.sync()
+        js.updateGrid(to_js(self.grid.snapshot()))
+        return msg
+
+grid = GardenGrid()
+garden_manager = GardenManager(grid, storage, history_stack, seed_bag)
+js.updateGrid(to_js(grid.snapshot()))
+print("Sanctuary grid initialized:", SIZE * SIZE, "cells ready for planting.")`,
+
+5: String.raw`import js
+
+STAGES = [("1. Seed Stage", "action: plant"), 
+          ("2. Sprout Stage", "action: water 1st time"),
+          ("3. Flower / Vegetative Phase", "action: water 2nd time"), 
+          ("4. Fully Mature (Harvestable)", "action: harvest & clears plot")]
+
+class GrowthNode:
+    def __init__(self, name, note=""):
+        self.name, self.note, self.children = name, note, []
+    def add_child(self, node):
+        self.children.append(node)
+        return node
+
+class GrowthTree:                  # N-ary general tree
+    def __init__(self, root):
+        self.root = root
+    def preorder(self, node, depth=0, out=None):
+        out = [] if out is None else out
+        note = "  (" + node.note + ")" if node.note else ""
+        out.append("  " * depth + node.name + note)
+        for ch in node.children:
+            self.preorder(ch, depth + 1, out)
+        return out
+    def preorder_print(self):
+        text = "\n".join(self.preorder(self.root))
+        print(text)
+        js.showTaxonomy(text)
+
+growth_tree = GrowthTree(GrowthNode("Garden Crops Growth Stages"))
+if "seed_bag" in globals():
+    for crop in seed_bag:
+        node = growth_tree.root.add_child(GrowthNode(crop.name, "matures in " + str(crop.days) + " days"))
+        for stage, note in STAGES:
+            node = node.add_child(GrowthNode(stage, note))
+growth_tree.preorder_print()`
+};
+
+/* ---------- Globals & helpers ---------- */
+window.gardenPlants = [];
+let pyodide = null;
+const $ = id => document.getElementById(id);
+const consoleEl = $('console');
+
+function log(msg, kind) {
+  const d = document.createElement('div');
+  d.textContent = msg;
+  d.style.color = kind === 'err' ? '#fca5a5' : kind === 'ok' ? '#86efac' : '#d9f2e0';
+  consoleEl.appendChild(d);
+  consoleEl.scrollTop = consoleEl.scrollHeight;
+}
+function showTab(t) {
+  $('view-garden').classList.toggle('hidden', t !== 'garden');$('view-editor').classList.toggle('hidden', t !== 'editor');
+  $('tab-garden').className = 'btn' + (t === 'garden' ? '' : ' alt');$('tab-editor').className = 'btn' + (t === 'editor' ? '' : ' alt');
+}
+function unlock(id, label) {
+  const p = $(id);
+  if (p.classList.contains('locked')) { p.classList.remove('locked'); log('🔓 Unlocked: ' + label, 'ok'); }
+}
+function loadTopic(n) { $('editor').value = TOPICS[n]; }
+
+/* ---------- Interop Functions Called By Python ---------- */
+window.updateResources = (w, s, e, h, c, produce) => {
+  $('r-water').textContent = w; $('r-seeds').textContent = s; $('r-energy').textContent = e;
+  $('r-hope').textContent = h; $('r-coins').textContent = c;
+  $('r-produce').textContent = produce || 'none';
+};
+window.addPlantsToDropdown = () => {
+  const sel = $('plant-select');
+  sel.innerHTML = '';
+  Array.from(window.gardenPlants).forEach(p => sel.add(new Option(p, p)));
+};
+window.updateHistory = items => {
+  const ul = $('history-list');
+  ul.innerHTML = '';
+  Array.from(items).forEach((a, i) => {
+    const li = document.createElement('li');
+    li.textContent = (i === 0 ? '▸ ' : '  ') + a;
+    if (i === 0) li.style.color = '#4ade80';
+    ul.appendChild(li);
+  });
+};
+window.updateQueue = items => {
+  const ol = $('queue-list');
+  ol.innerHTML = '';
+  Array.from(items).forEach(e => { const li = document.createElement('li'); li.textContent = e; ol.appendChild(li); });
+};
+window.updateGrid = cells => {
+  Array.from(cells).forEach((s, i) => {
+    const [state, icon] = s.split('|');
+    const t = $('grid').children[i];
+    t.className = 'tile ' + state;
+    t.textContent = icon;
+  });
+};
+window.showTaxonomy = text => { $('taxonomy-out').textContent = text; };
+
+/* ---------- Grid setup & tile clicks ---------- */
+for (let i = 0; i < 25; i++) {
+  const b = document.createElement('button');
+  b.className = 'tile';
+  b.title = 'Row ' + Math.floor(i / 5) + ', Col ' + (i % 5) + ' (index ' + i + ')';
+  b.onclick = () => onTileClick(i);
+  $('grid').appendChild(b);
+}
+async function onTileClick(pos) {
+  if (!pyodide || $('panel-grid').classList.contains('locked')) return;
+  const actionType = $('action-select').value;
+  const crop = $('plant-select').value;
+  try {
+    pyodide.globals.set('_pos', pos);
+    pyodide.globals.set('_act', actionType);
+    pyodide.globals.set('_crop', crop);
+    const msg = await pyodide.runPythonAsync('garden_manager.handle_action(_pos, _act, _crop)');
+    log(msg, msg.startsWith('⚠') ? 'err' : 'ok');
+  } catch (e) { log('Error: ' + e.message, 'err'); }
+}
+
+/* ---------- Panel Actions ---------- */
+async function pyCall(expr) {
+  try { return await pyodide.runPythonAsync(expr); }
+  catch (e) { log('Error: ' + e.message, 'err'); }
+}
+async function marketCall(expr) {
+  if ($('panel-resources').classList.contains('locked')) return;
+  const m = await pyCall(expr);
+  if (m) log(m, m.startsWith('⚠') ? 'err' : 'ok');
+}
+function buySeeds(n) { return marketCall('storage.buy_seeds(' + n + ')'); }
+function sellProduce() { return marketCall('storage.sell_produce()'); }
+async function processEvent() { const m = await pyCall('climate_queue.process_next()'); if (m) log('🌦 ' + m, 'ok'); }
+async function addEvent() {
+  const evs = ['Rain', 'Drought', 'Heatwave', 'Pollinators', 'Frost'];
+  const e = evs[Math.floor(Math.random() * evs.length)];
+  await pyCall('climate_queue.enqueue("' + e + '")');
+  log('Enqueued: ' + e);
+}
+async function runDFS() { await pyCall('growth_tree.preorder_print()'); }
+
+/* ---------- Execution Routing ---------- */
+async function executeCode(code) {
+  if (!pyodide) return;
+  try {
+    await pyodide.runPythonAsync(code);
+    if (code.includes('addPlantsToDropdown')) unlock('panel-resources', 'Resource Storage');
+    if (code.includes('ActionHistoryStack')) unlock('panel-history', 'Action History');
+    if (code.includes('ClimateQueue')) unlock('panel-queue', 'Climate Queue');
+    if (code.includes('GardenGrid')) unlock('panel-grid', 'Sanctuary Grid');
+    if (code.includes('GrowthTree')) unlock('panel-taxonomy', 'Growth Stage Tree');
+    return true;
+  } catch (e) {
+    log(String(e.message).split('\n').slice(-3).join('\n'), 'err');
+    return false;
+  }
+}
+async function runPythonCode() {
+  log('>>> Running editor code…');
+  await executeCode($('editor').value);
+}
+async function runAllTopics() {
+  for (let n = 1; n <= 5; n++) {
+    log('>>> Topic ' + n);
+    if (!(await executeCode(TOPICS[n]))) break;
+  }
+}
+
+/* ---------- Pyodide Bootstrapper ---------- */
+(async () => {
+  loadTopic(1);
+  try {
+    pyodide = await loadPyodide();
+    pyodide.setStdout({ batched: s => log(s) });
+    pyodide.setStderr({ batched: s => log(s, 'err') });
+    await pyodide.runPythonAsync('import js\nimport pyodide');
+    $('status').textContent = 'Python engine ready ✔ — load a topic in the Code Editor tab and run it.';
+    $('status').style.color = '#86efac';
+    $('run-btn').disabled = false; $('run-all').disabled = false;
+    log('Pyodide ' + pyodide.version + ' loaded. Start by running Topic 1.', 'ok');
+  } catch (e) {
+    $('status').textContent = 'Could not load Pyodide engine.';
+    log('Pyodide failed to load: ' + e.message, 'err');
+  }
+})();
+showTab('editor');
+</script>
+</body>
+</html>
